@@ -1,99 +1,90 @@
 // backend/server.js  
-const express = require("express");  
-const admin = require("firebase-admin");  
-const cors = require("cors");  
-const http = require("http");  
-const socketIo = require("socket.io");  
-require("dotenv").config();  
+require('dotenv').config();  
+const express = require('express');  
+const http = require('http');  
+const socketIo = require('socket.io');  
+const cors = require('cors');  
+const admin = require('firebase-admin');  
 
-// Khởi tạo Firebase  
 const serviceAccount = {  
-  projectId: process.env.FIREBASE_PROJECT_ID,  
-  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),  
-  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,  
+    projectId: process.env.FIREBASE_PROJECT_ID,  
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),  
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,  
 };  
 
 admin.initializeApp({  
-  credential: admin.credential.cert(serviceAccount),  
-  databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`,  
+    credential: admin.credential.cert(serviceAccount),  
+    databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`  
 });  
 
 const db = admin.firestore();  
-const app = express();  
-app.use(express.json());  
-app.use(  
-  cors({  
-    origin: "http://localhost:3000",  
-    methods: ["GET", "POST", "PUT", "DELETE"],  
-    allowedHeaders: ["Content-Type", "Authorization"],  
-  })  
-);  
 
+const app = express();  
 const server = http.createServer(app);  
 const io = socketIo(server);  
-const collection = db.collection("movies"); // Collection trees trong Firestore  
 
-// 1. Tạo cây mới: POST  
-app.post("/tickets", async (req, res) => {  
-  try {  
-    const { name, description, img } = req.body;  
-    const tree = { name, description, img };  
-    const docRef = await collection.add(tree);  
-    res.status(201).send({ id: docRef.id, message: "Tree created successfully" });  
-  } catch (error) {  
-    res.status(500).send("Error creating tree: " + error.message);  
-  }  
-});  
+app.use(cors());  
+app.use(express.json());  
+app.use(express.static('../frontend')); // Đường dẫn tới thư mục frontend  
 
-// 2. Lấy tất cả cây: GET  
-app.get("/tickets", async (req, res) => {  
-  try {  
-    const snapshot = await collection.get();  
-    const trees = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));  
-    res.status(200).json(trees);  
-  } catch (error) {  
-    res.status(500).json({ error: "Error fetching trees", details: error.message });  
-  }  
-});  
+const PORT = process.env.PORT || 3000;  
 
-// 3. Lấy một cây theo ID: GET/id  
-app.get("/tickets/:id", async (req, res) => {  
-  try {  
-    const doc = await collection.doc(req.params.id).get();  
-    if (!doc.exists) {  
-      return res.status(404).send("Tree not found");  
+// Lấy vé từ Firestore  
+app.get('/api/tickets', async (req, res) => {  
+    try {  
+        const snapshot = await db.collection('tickets').get();  
+        let tickets = [];  
+        snapshot.forEach(doc => {  
+            tickets.push({ id: doc.id, ...doc.data() });  
+        });  
+        res.json(tickets);  
+    } catch (error) {  
+        res.status(500).json({ error: "Error fetching tickets", details: error.message });  
     }  
-    res.status(200).json({ id: doc.id, ...doc.data() });  
-  } catch (error) {  
-    res.status(500).send("Error fetching tree: " + error.message);  
-  }  
 });  
 
-// 4. Cập nhật một cây theo ID: PUT/id  
-app.put("/tickets/:id", async (req, res) => {  
-  try {  
-    const { name, description, img } = req.body;  
-    const updatedTree = { name, description, img };  
-    await collection.doc(req.params.id).update(updatedTree);  
-    io.emit("treeUpdated", { id: req.params.id, ...updatedTree });  
-    res.status(200).send("Tree updated successfully");  
-  } catch (error) {  
-    res.status(500).send("Error updating tree: " + error.message);  
-  }  
+// Đặt vé  
+app.post('/api/tickets/book', async (req, res) => {  
+    const { ticketId } = req.body;  
+    const ticketRef = db.collection('tickets').doc(ticketId);  
+    const ticket = await ticketRef.get();  
+
+    if (ticket.exists && ticket.data().status === 'available') {  
+        await ticketRef.update({  
+            status: 'locked',  
+            lockedUntil: admin.firestore.Timestamp.now(),  
+        });  
+        const updatedTicket = { id: ticketId, ...ticket.data(), status: 'locked' };  
+        io.emit('ticketUpdated', updatedTicket);  
+        res.json({ success: true, ticket: updatedTicket });  
+    } else {  
+        res.status(400).json({ success: false, message: 'Ticket not available' });  
+    }  
 });  
 
-// 5. Xóa một cây theo ID: DELETE/id  
-app.delete("/tickets/:id", async (req, res) => {  
-  try {  
-    await collection.doc(req.params.id).delete();  
-    res.status(200).send("Tree deleted successfully");  
-  } catch (error) {  
-    res.status(500).send("Error deleting tree: " + error.message);  
-  }  
+// Cập nhật trạng thái vé sau 10 phút  
+setInterval(async () => {  
+    const snapshot = await db.collection('tickets').get();  
+    snapshot.forEach(async (doc) => {  
+        const ticketData = doc.data();  
+        const lockedUntil = ticketData.lockedUntil?.toDate();  
+
+        if (ticketData.status === 'locked' && Date.now() > lockedUntil?.getTime()) {  
+            await db.collection('tickets').doc(doc.id).update({ status: 'available' });  
+            io.emit('ticketUpdated', { id: doc.id, ...ticketData, status: 'available' });  
+        }  
+    });  
+}, 60000); // Kiểm tra mỗi phút  
+
+io.on('connection', (socket) => {  
+    console.log('New client connected');  
+    socket.on('disconnect', () => {  
+        console.log('Client disconnected');  
+    });  
 });  
 
-// Chạy server với port online hoặc 5000 local  
-const PORT = process.env.PORT || 5000;  
 server.listen(PORT, () => {  
-  console.log(`Server is running on port ${PORT}`);  
-});
+    console.log(`Server is running on port ${PORT}`);  
+});  
+
+module.exports = db;
