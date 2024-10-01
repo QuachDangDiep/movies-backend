@@ -1,23 +1,11 @@
 // backend/server.js  
-require('dotenv').config();  
 const express = require('express');  
 const http = require('http');  
 const socketIo = require('socket.io');  
 const cors = require('cors');  
-const admin = require('firebase-admin');  
+const db = require('./firebase');  
 
-const serviceAccount = {  
-    projectId: process.env.FIREBASE_PROJECT_ID,  
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),  
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,  
-};  
-
-admin.initializeApp({  
-    credential: admin.credential.cert(serviceAccount),  
-    databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`  
-});  
-
-const db = admin.firestore();  
+require('dotenv').config();  
 
 const app = express();  
 const server = http.createServer(app);  
@@ -31,16 +19,12 @@ const PORT = process.env.PORT || 3000;
 
 // Lấy vé từ Firestore  
 app.get('/api/tickets', async (req, res) => {  
-    try {  
-        const snapshot = await db.collection('tickets').get();  
-        let tickets = [];  
-        snapshot.forEach(doc => {  
-            tickets.push({ id: doc.id, ...doc.data() });  
-        });  
-        res.json(tickets);  
-    } catch (error) {  
-        res.status(500).json({ error: "Error fetching tickets", details: error.message });  
-    }  
+    const snapshot = await db.collection('tickets').get();  
+    let tickets = [];  
+    snapshot.forEach(doc => {  
+        tickets.push({ id: doc.id, ...doc.data() });  
+    });  
+    res.json(tickets);  
 });  
 
 // Đặt vé  
@@ -85,6 +69,4 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {  
     console.log(`Server is running on port ${PORT}`);  
-});  
-
-module.exports = db;
+});
