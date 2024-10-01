@@ -1,74 +1,92 @@
-const express = require('express');  
-const bodyParser = require('body-parser');  
-const morgan = require('morgan');  
-const admin = require('firebase-admin');  
-
-// Khởi tạo Firebase Admin SDK  
-const serviceAccount = require('./path/to/serviceAccountKey.json'); // Đường dẫn tới tệp JSON  
-admin.initializeApp({  
-    credential: admin.credential.cert(serviceAccount),  
-    databaseURL: 'https://Movie-ticket-sales.firebaseio.com' // Thay thế bằng URL của database của bạn  
-});  
+const express = require("express");  
+const admin = require("firebase-admin");  
+const cors = require("cors");  
+require("dotenv").config();  
 
 const app = express();  
-const PORT = process.env.PORT || 3000;  
+app.use(express.json());  
+app.use(  
+  cors({  
+    origin: "http://localhost:3000", // Thay đổi nếu cần  
+    methods: ["GET", "POST", "PUT", "DELETE"],  
+    allowedHeaders: ["Content-Type", "Authorization"],  
+  })  
+);  
 
-// Middleware  
-app.use(bodyParser.json());  
-app.use(morgan('dev'));  
-
-// Lấy danh sách sự kiện từ Firestore  
-app.get('/api/events', async (req, res) => {  
-    const eventsRef = admin.firestore().collection('events');  
-    const snapshot = await eventsRef.get();  
-    const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));  
-    res.json(events);  
+// Khởi tạo Firebase SDK  
+admin.initializeApp({  
+  credential: admin.credential.cert({  
+    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),  
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,  
+    projectId: process.env.FIREBASE_PROJECT_ID,  
+  }),  
 });  
 
-// Tạo sự kiện mới  
-app.post('/api/events', async (req, res) => {  
-    const { name, date, ticketsAvailable } = req.body;  
-    const newEvent = { name, date, ticketsAvailable };  
+const db = admin.firestore();  
+const collection = db.collection("Tickets"); // Thay đổi tên collection cho vé  
 
-    const eventsRef = admin.firestore().collection('events');  
-    const docRef = await eventsRef.add(newEvent);  
-    res.status(201).json({ id: docRef.id, ...newEvent });  
+// 1. Tạo vé mới: POST  
+app.post("/tickets", async (req, res) => {  
+  try {  
+    const { event, price, quantity } = req.body; // Dữ liệu vé nhận từ request body  
+    const ticket = { event, price, quantity };  
+    const docRef = await collection.add(ticket);  
+    res  
+      .status(201)  
+      .send({ id: docRef.id, message: "Ticket created successfully" });  
+  } catch (error) {  
+    res.status(500).send("Error creating ticket: " + error.message);  
+  }  
 });  
 
-// Đặt vé cho sự kiện  
-app.post('/api/events/:id/tickets', async (req, res) => {  
-    const eventId = req.params.id;  
-    const { quantity } = req.body;  
+// 2. Lấy danh sách tất cả vé: GET  
+app.get("/tickets", async (req, res) => {  
+  try {  
+    const snapshot = await collection.get();  
+    const tickets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));  
+    res.status(200).json(tickets);  
+  } catch (error) {  
+    res.status(500).json({ error: "Error fetching tickets", details: error.message });  
+  }  
+});  
 
-    const eventRef = admin.firestore().collection('events').doc(eventId);  
-    const eventDoc = await eventRef.get();  
-    if (!eventDoc.exists) {  
-        return res.status(404).send('Event not found');  
+// 3. Lấy vé theo ID: GET/id  
+app.get("/tickets/:id", async (req, res) => {  
+  try {  
+    const doc = await collection.doc(req.params.id).get();  
+    if (!doc.exists) {  
+      return res.status(404).send("Ticket not found");  
     }  
-
-    const event = eventDoc.data();  
-    if (event.ticketsAvailable < quantity) {  
-        return res.status(400).send('Not enough tickets available');  
-    }  
-
-    const updatedTicketsAvailable = event.ticketsAvailable - quantity;  
-    await eventRef.update({ ticketsAvailable: updatedTicketsAvailable });  
-
-    res.status(200).json({ message: `Successfully booked ${quantity} tickets for ${event.name}` });  
+    res.status(200).json({ id: doc.id, ...doc.data() });  
+  } catch (error) {  
+    res.status(500).send("Error fetching ticket: " + error.message);  
+  }  
 });  
 
-// Xử lý lỗi 404  
-app.use((req, res) => {  
-    res.status(404).send('404 Not Found');  
+// 4. Cập nhật vé theo ID: PUT/id  
+app.put("/tickets/:id", async (req, res) => {  
+  try {  
+    const { event, price, quantity } = req.body; // Các trường mới hoặc cập nhật  
+    const updatedTicket = { event, price, quantity };  
+    await collection.doc(req.params.id).update(updatedTicket);  
+    res.status(200).send("Ticket updated successfully");  
+  } catch (error) {  
+    res.status(500).send("Error updating ticket: " + error.message);  
+  }  
 });  
 
-// Xử lý lỗi chung  
-app.use((err, req, res) => {  
-    console.error(err.stack);  
-    res.status(500).send('Something went wrong!');  
+// 5. Xóa vé theo ID: DELETE/id  
+app.delete("/tickets/:id", async (req, res) => {  
+  try {  
+    await collection.doc(req.params.id).delete();  
+    res.status(200).send("Ticket deleted successfully");  
+  } catch (error) {  
+    res.status(500).send("Error deleting ticket: " + error.message);  
+  }  
 });  
 
-// Khởi động máy chủ  
+// Chạy server  
+const PORT = process.env.PORT || 5000;  
 app.listen(PORT, () => {  
-    console.log(`Server is running on http://localhost:${PORT}`);  
+  console.log(`Server is running on port ${PORT}`);  
 });
