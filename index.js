@@ -31,10 +31,10 @@ app.use(
 
 const server = http.createServer(app);  
 const io = socketIo(server);  
-const collection = db.collection("trees"); // Collection trees trong Firestore  
+const collection = db.collection("movies"); // Collection trees trong Firestore  
 
 // 1. Tạo cây mới: POST  
-app.post("/trees", async (req, res) => {  
+app.post("/tickets", async (req, res) => {  
   try {  
     const { name, description, img } = req.body;  
     const tree = { name, description, img };  
@@ -46,7 +46,7 @@ app.post("/trees", async (req, res) => {
 });  
 
 // 2. Lấy tất cả cây: GET  
-app.get("/trees", async (req, res) => {  
+app.get("/tickets", async (req, res) => {  
   try {  
     const snapshot = await collection.get();  
     const trees = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));  
@@ -57,7 +57,7 @@ app.get("/trees", async (req, res) => {
 });  
 
 // 3. Lấy một cây theo ID: GET/id  
-app.get("/trees/:id", async (req, res) => {  
+app.get("/tickets/:id", async (req, res) => {  
   try {  
     const doc = await collection.doc(req.params.id).get();  
     if (!doc.exists) {  
@@ -70,7 +70,7 @@ app.get("/trees/:id", async (req, res) => {
 });  
 
 // 4. Cập nhật một cây theo ID: PUT/id  
-app.put("/trees/:id", async (req, res) => {  
+app.put("/tickets/:id", async (req, res) => {  
   try {  
     const { name, description, img } = req.body;  
     const updatedTree = { name, description, img };  
@@ -83,7 +83,7 @@ app.put("/trees/:id", async (req, res) => {
 });  
 
 // 5. Xóa một cây theo ID: DELETE/id  
-app.delete("/trees/:id", async (req, res) => {  
+app.delete("/tickets/:id", async (req, res) => {  
   try {  
     await collection.doc(req.params.id).delete();  
     res.status(200).send("Tree deleted successfully");  
