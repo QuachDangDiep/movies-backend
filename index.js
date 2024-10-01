@@ -23,7 +23,7 @@ admin.initializeApp({
 });  
 
 const db = admin.firestore();  
-const collection = db.collection("Tickets"); // Thay đổi tên collection cho vé  
+const collection = db.collection("movies"); // Thay đổi tên collection cho vé  
 
 // 1. Tạo vé mới: POST  
 app.post("/tickets", async (req, res) => {  
