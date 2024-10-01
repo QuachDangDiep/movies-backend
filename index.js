@@ -1,72 +1,74 @@
-// backend/server.js  
 const express = require('express');  
-const http = require('http');  
-const socketIo = require('socket.io');  
-const cors = require('cors');  
-const db = require('./firebase');  
+const bodyParser = require('body-parser');  
+const morgan = require('morgan');  
+const admin = require('firebase-admin');  
 
-require('dotenv').config();  
+// Khởi tạo Firebase Admin SDK  
+const serviceAccount = require('./path/to/serviceAccountKey.json'); // Đường dẫn tới tệp JSON  
+admin.initializeApp({  
+    credential: admin.credential.cert(serviceAccount),  
+    databaseURL: 'https://Movie-ticket-sales.firebaseio.com' // Thay thế bằng URL của database của bạn  
+});  
 
 const app = express();  
-const server = http.createServer(app);  
-const io = socketIo(server);  
-
-app.use(cors());  
-app.use(express.json());  
-app.use(express.static('../frontend')); // Đường dẫn tới thư mục frontend  
-
 const PORT = process.env.PORT || 3000;  
 
-// Lấy vé từ Firestore  
-app.get('/api/tickets', async (req, res) => {  
-    const snapshot = await db.collection('tickets').get();  
-    let tickets = [];  
-    snapshot.forEach(doc => {  
-        tickets.push({ id: doc.id, ...doc.data() });  
-    });  
-    res.json(tickets);  
+// Middleware  
+app.use(bodyParser.json());  
+app.use(morgan('dev'));  
+
+// Lấy danh sách sự kiện từ Firestore  
+app.get('/api/events', async (req, res) => {  
+    const eventsRef = admin.firestore().collection('events');  
+    const snapshot = await eventsRef.get();  
+    const events = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));  
+    res.json(events);  
 });  
 
-// Đặt vé  
-app.post('/api/tickets/book', async (req, res) => {  
-    const { ticketId } = req.body;  
-    const ticketRef = db.collection('tickets').doc(ticketId);  
-    const ticket = await ticketRef.get();  
+// Tạo sự kiện mới  
+app.post('/api/events', async (req, res) => {  
+    const { name, date, ticketsAvailable } = req.body;  
+    const newEvent = { name, date, ticketsAvailable };  
 
-    if (ticket.exists && ticket.data().status === 'available') {  
-        await ticketRef.update({  
-            status: 'locked',  
-            lockedUntil: admin.firestore.Timestamp.now(),  
-        });  
-        const updatedTicket = { id: ticketId, ...ticket.data(), status: 'locked' };  
-        io.emit('ticketUpdated', updatedTicket);  
-        res.json({ success: true, ticket: updatedTicket });  
-    } else {  
-        res.status(400).json({ success: false, message: 'Ticket not available' });  
+    const eventsRef = admin.firestore().collection('events');  
+    const docRef = await eventsRef.add(newEvent);  
+    res.status(201).json({ id: docRef.id, ...newEvent });  
+});  
+
+// Đặt vé cho sự kiện  
+app.post('/api/events/:id/tickets', async (req, res) => {  
+    const eventId = req.params.id;  
+    const { quantity } = req.body;  
+
+    const eventRef = admin.firestore().collection('events').doc(eventId);  
+    const eventDoc = await eventRef.get();  
+    if (!eventDoc.exists) {  
+        return res.status(404).send('Event not found');  
     }  
+
+    const event = eventDoc.data();  
+    if (event.ticketsAvailable < quantity) {  
+        return res.status(400).send('Not enough tickets available');  
+    }  
+
+    const updatedTicketsAvailable = event.ticketsAvailable - quantity;  
+    await eventRef.update({ ticketsAvailable: updatedTicketsAvailable });  
+
+    res.status(200).json({ message: `Successfully booked ${quantity} tickets for ${event.name}` });  
 });  
 
-// Cập nhật trạng thái vé sau 10 phút  
-setInterval(async () => {  
-    const snapshot = await db.collection('tickets').get();  
-    snapshot.forEach(async (doc) => {  
-        const ticketData = doc.data();  
-        const lockedUntil = ticketData.lockedUntil?.toDate();  
-
-        if (ticketData.status === 'locked' && Date.now() > lockedUntil?.getTime()) {  
-            await db.collection('tickets').doc(doc.id).update({ status: 'available' });  
-            io.emit('ticketUpdated', { id: doc.id, ...ticketData, status: 'available' });  
-        }  
-    });  
-}, 60000); // Kiểm tra mỗi phút  
-
-io.on('connection', (socket) => {  
-    console.log('New client connected');  
-    socket.on('disconnect', () => {  
-        console.log('Client disconnected');  
-    });  
+// Xử lý lỗi 404  
+app.use((req, res) => {  
+    res.status(404).send('404 Not Found');  
 });  
 
-server.listen(PORT, () => {  
-    console.log(`Server is running on port ${PORT}`);  
+// Xử lý lỗi chung  
+app.use((err, req, res) => {  
+    console.error(err.stack);  
+    res.status(500).send('Something went wrong!');  
+});  
+
+// Khởi động máy chủ  
+app.listen(PORT, () => {  
+    console.log(`Server is running on http://localhost:${PORT}`);  
 });
