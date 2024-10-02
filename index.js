@@ -7,11 +7,12 @@ const app = express();
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3000", // Địa chỉ frontend của bạn
+    origin: ["http://localhost:3001"], // Thêm địa chỉ frontend
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 
 // Khởi tạo Firebase Admin SDK
 admin.initializeApp({
